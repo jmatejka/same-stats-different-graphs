@@ -1,6 +1,14 @@
 """
-Usage:
-    samestats run <shape_start> <shape_end> [<iters>][<decimals>][<frames>]
+Usage: samestats run [options] <shape_start> <shape_end>
+
+Options:
+    --iters=<n> | -i <n>            Number of iterations of perturbations.
+                                    [default: 100000]
+    --prec=<n> | -p <n>             Level of precision to maintain. [default: 2]
+    --frames=<n> | -f <n>           Number of frames to produce for making
+                                    animations. [default: 100]
+    --output=<path> | -o <path>     Directory to output the images to.
+                                    [default: ./]
 
     This is code created for the paper:
     Same Stats, Different Graphs: Generating Datasets with Varied Appearance and
@@ -27,11 +35,11 @@ Usage:
     it to you. I will be adding all that functionality back in, in a more
     reasonable way shortly, and will have the project hosted on GitHub so it is
     easier to share.
-
 """
 
 from __future__ import division, print_function
 
+import os
 import sys
 import math
 import itertools
@@ -497,7 +505,8 @@ def run_pattern(df,
                 ramp_out=False,
                 freeze_for=0,
                 reset_counts=False,
-                custom_points=False):
+                custom_points=False,
+                output_folder='.'):
     """The main function, transforms one dataset into a target shape by
     perturbing it.
 
@@ -512,26 +521,16 @@ def run_pattern(df,
     r_good = df.copy()
 
     # this is a list of frames that we will end up writing to file
+    tweening_style = {
+        (True, True): pytweening.easeInOutSine,
+        (True, False): pytweening.easeInSine,
+        (False, True): pytweening.easeOutSine,
+        (False, False): pytweening.linear,
+    }[ramp_in, ramp_out]
     write_frames = [
-        int(round(pytweening.linear(x) * iters))
+        int(round(tweening_style(x) * iters))
         for x in np.arange(0, 1, 1 / (num_frames - freeze_for))
     ]
-
-    if ramp_in and not ramp_out:
-        write_frames = [
-            int(round(pytweening.easeInSine(x) * iters))
-            for x in np.arange(0, 1, 1 / (num_frames - freeze_for))
-        ]
-    elif ramp_out and not ramp_in:
-        write_frames = [
-            int(round(pytweening.easeOutSine(x) * iters))
-            for x in np.arange(0, 1, 1 / (num_frames - freeze_for))
-        ]
-    elif ramp_out and ramp_in:
-        write_frames = [
-            int(round(pytweening.easeInOutSine(x) * iters))
-            for x in np.arange(0, 1, 1 / (num_frames - freeze_for))
-        ]
 
     extras = [iters] * freeze_for
     write_frames.extend(extras)
@@ -541,13 +540,11 @@ def run_pattern(df,
 
     frame_count = 0
     # this is the main loop, were we run for many iterations to come up with the pattern
-    for i in looper(
-            iters + 1, leave=True, ascii=True, desc=target + " pattern"):
+    for i in looper(iters + 1, leave=True, ascii=True, desc=target + " pattern"):
         t = (max_temp - min_temp) * s_curve(((iters - i) / iters)) + min_temp
 
         if target in ALL_TARGETS:
-            test_good = perturb(
-                r_good.copy(), initial=df, target=target, temp=t)
+            test_good = perturb(r_good.copy(), initial=df, target=target, temp=t)
         else:
             raise Exception("bah, that's not a proper type of pattern")
 
@@ -559,17 +556,18 @@ def run_pattern(df,
         for _ in range(write_frames.count(i)):
             save_scatter_and_results(
                 r_good,
-                '{}-image-{:05d}'.format(target, frame_count),
-                150)
+                os.path.join(output_folder, '{}-image-{:05d}'.format(target, frame_count)),
+                150,
+            )
             # save_scatter(r_good, "{}-image-{:05d}".format(target, frame_count), 150)
-            r_good.to_csv("{}-data-{:05d}.csv".format(target, frame_count))
+            r_good.to_csv(os.path.join(output_folder, "{}-data-{:05d}.csv".format(target, frame_count)))
 
             frame_count += 1
 
     return r_good
 
 
-def do_single_run(start_dataset, target, iterations=100000, decimals=2, num_frames=100):
+def do_single_run(start_dataset, target, iterations, decimals, num_frames, output_folder):
     """Loads a dataset, and then perturbs it.
 
     ``start_dataset`` is a string, and one of::
@@ -577,7 +575,12 @@ def do_single_run(start_dataset, target, iterations=100000, decimals=2, num_fram
         ['dino', 'rando', 'slant', 'big_slant']
     """
     df = load_dataset(start_dataset)
-    temp = run_pattern(df, target, iters=iterations, num_frames=num_frames)
+    temp = run_pattern(
+        df,
+        target,
+        iters=iterations,
+        num_frames=num_frames,
+        output_folder=output_folder)
     return temp
 
 
@@ -595,21 +598,25 @@ def main():
     arguments = docopt(__doc__, version='Same Stats 1.0')
     if arguments['run']:
         with plot_settings():
-            it = 100000
-            de = 2
-            frames = 100
-            if arguments['<iters>']:
-                it = int(arguments['<iters>'])
-            if arguments['<decimals>']:
-                de = int(arguments['<decimals>'])
-            if arguments['<decimals>']:
-                frames = int(arguments['<frames>'])
+            iters = int(arguments['--iters'])
+            precision = int(arguments['--prec'])
+            frames = int(arguments['--frames'])
+            output = arguments['--output']
+            if not os.path.isdir(output):
+                os.makedirs(output)
 
             shape_start = arguments['<shape_start>']
             shape_end = arguments['<shape_end>']
 
             if shape_start in INITIAL_DATASETS and shape_end in ALL_TARGETS:
-                do_single_run(shape_start, shape_end, iterations=it, decimals=de, num_frames=frames)
+                do_single_run(
+                    shape_start,
+                    shape_end,
+                    iterations=iters,
+                    decimals=precision,
+                    num_frames=frames,
+                    output_folder=output,
+                )
             else:
                 print("************* One of those shapes isn't correct:")
                 print("shape_start must be one of ", INITIAL_DATASETS)
